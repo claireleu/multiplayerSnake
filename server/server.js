@@ -11,30 +11,21 @@ io.on('connection', client => {
   client.on('keydown', handleKeydown);
   client.on('newGame', handleNewGame);
   client.on('joinGame', handleJoinGame);
+  client.on('leaveGame', handleLeaveGame);
+  client.on('disconnect', handleDisconnect);
 
   function handleJoinGame(roomName) {
-    const room = io.sockets.adapter.rooms[roomName];
+    const room = io.sockets.adapter.rooms.get(roomName);
 
-    let allUsers;
-    if (room) {
-      allUsers = room.sockets;
-    }
-
-    let numClients = 0;
-    if (allUsers) {
-      numClients = Object.keys(allUsers).length;
-    }
-
-    if (numClients === 0) {
+    if (!room || room.size === 0) {
       client.emit('unknownCode');
       return;
-    } else if (numClients > 1) {
+    } else if (room.size > 1) {
       client.emit('tooManyPlayers');
       return;
     }
 
     clientRooms[client.id] = roomName;
-
     client.join(roomName);
     client.number = 2;
     client.emit('init', 2);
@@ -72,6 +63,25 @@ io.on('connection', client => {
       state[roomName].players[client.number - 1].vel = vel;
     }
   }
+
+  function handleLeaveGame() {
+    const roomName = clientRooms[client.id];
+    if (!roomName) return;
+
+    client.leave(roomName);
+    delete clientRooms[client.id];
+
+    const room = io.sockets.adapter.rooms.get(roomName);
+    if (!room || room.size === 0) {
+      delete state[roomName];
+    }
+
+    client.emit('leftGame', { message: 'You have left the game.' });
+  }
+
+  function handleDisconnect() {
+    handleLeaveGame();
+  }
 });
 
 function startGameInterval(roomName) {
@@ -79,7 +89,7 @@ function startGameInterval(roomName) {
     const winner = gameLoop(state[roomName]);
     
     if (!winner) {
-      emitGameState(roomName, state[roomName])
+      emitGameState(roomName, state[roomName]);
     } else {
       emitGameOver(roomName, winner);
       state[roomName] = null;
@@ -89,7 +99,6 @@ function startGameInterval(roomName) {
 }
 
 function emitGameState(room, gameState) {
-  // Send this event to everyone in the room.
   io.sockets.in(room)
     .emit('gameState', JSON.stringify(gameState));
 }
